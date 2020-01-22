@@ -1,0 +1,267 @@
+library(tidyverse)
+library(rjson)
+
+data <- fromJSON(paste(readLines('./src/SC_2020_player_data.json'), collapse=""))
+
+data <- lapply(data, function(x){
+  
+  x$team_name <- x$team$name
+  x$team_abbrev <- x$team$abbrev
+  x$team <- NULL
+  
+  for(i in 1:length(x$positions)){
+    x[paste0('pos',i)] <- x$positions[[i]]$position
+  }
+  x$positions <- NULL
+  
+  return(x)
+})
+
+players <- bind_rows(data) %>%
+  rename(ff_id = feed_id,
+         sc_id = id,
+         avg = previous_average) %>%
+  mutate(year = 2020) %>%
+  filter(previous_games > 3) %>%
+  select(year, ff_id, sc_id, first_name, last_name, team_abbrev, pos1, pos2, avg) %>%
+  arrange(desc(avg))
+
+players
+
+
+field_structure <- list(DEF = 5, MID = 7, RUC = 1, FWD = 5)
+snake_order <- c(seq(1:8), rep(c(seq(1:8), rev(seq(1:8))), 10), seq(1:8))
+
+
+
+elements <- c(rep('D', 5), 
+  rep('M', 7),
+  rep('R', 1),
+  rep('F', 5))
+
+elements <- list(c(rep('D', 2), 
+              rep('M', 2),
+              rep('R', 2),
+              rep('F', 2)))
+
+
+# Number of different draft orders
+factorial(18)/(factorial(5)*factorial(7)*factorial(1)*factorial(5))
+
+
+library(combinat)
+
+tmp <- permn(elements)
+
+
+d <- do.call("expand.grid", rep(list(0:3),13))
+d<-NULL
+
+gc()
+
+library(multicool) #https://stackoverflow.com/questions/38484264/r-find-unique-permutations-of-values
+library(tictoc)
+
+tic()
+perm <- allPerm(initMC(c(rep('D', 5),
+                         rep('M', 7),
+                         rep('R', 1),
+                         rep('F', 5))))
+toc()
+
+
+
+# too many permutations to save to memory - will try random sampling
+
+
+elements <- (rep('D', 2), 
+              rep('M', 2),
+              rep('R', 1),
+              rep('F', 2))
+
+results <- tibble()
+
+
+draft_pos <- 1
+
+for (i in 1:10){
+  
+  smpl <- sample(elements)
+  
+  
+  
+}
+
+
+coaches <- 
+rounds <- 22
+
+#######################################3
+
+pos_limits <- tibble(
+  pos = c('DEF', 'MID', 'RUC', 'FWD'),
+  limit = c(5,7,1,5)
+)
+
+pick_order <- c(seq(1:8), rep(c(seq(1:8), rev(seq(1:8))), 8), seq(1:8))
+coaches <- seq(1:8)
+
+
+backup <- players
+backup
+
+
+elements <- c(rep('DEF', 5), 
+              rep('MID', 7),
+              rep('RUC', 1),
+              rep('FWD', 5))
+
+results <- tibble()
+
+for(i in 1:10000){
+  
+  order <- sample(elements)
+  myPick <- sample(1:8,1)[1]
+  
+  obs <- tibble(
+    pick = myPick,
+    order = paste(order, collapse = '|')
+  )
+
+  players <- backup
+  
+  players$coach <- NA
+  players$pick <- NA
+  players$selectedPos <- NA
+
+  for(pick in 1:length(pick_order)){
+   
+    avail_pos <- NULL
+    
+    #pick <- 21
+    vCoach <- coaches[pick_order[pick]]
+    
+    if(vCoach == myPick) {
+      avail_pos <- order[1]
+      order <- order[-1]
+    } else {
+      
+      # Get current team
+      pos_summary <- players %>%
+        filter(coach == vCoach) %>%
+        group_by(selectedPos) %>%
+        summarise(count = n())
+      
+      if(nrow(pos_summary) > 0) {
+        pos_summary2 <- left_join(pos_limits, pos_summary, by = c('pos' = 'selectedPos')) %>%
+          mutate(count = replace_na(count, 0)) %>%
+          mutate(rem = limit - count) %>%
+          filter(rem > 0)
+        
+        avail_pos <- pos_summary2$pos
+        }
+      }
+  
+    if(length(avail_pos)>0) {
+      available_players <- players %>%
+        filter(is.na(coach)) %>%
+        filter(pos1 %in% avail_pos) %>%
+        arrange(desc(avg))
+    } else {
+      # Determine list of available players
+      available_players <- players %>%
+        filter(is.na(coach)) %>%
+        arrange(desc(avg))
+    }
+  
+  
+    # Player selection
+    selection <- available_players$sc_id[1]
+    
+    players$coach[players$sc_id == selection] <- vCoach
+    players$pick[players$sc_id == selection] <- pick
+    players$selectedPos[players$sc_id == selection] <- players$pos1[players$sc_id == selection] 
+    
+  }
+  
+  smy <- players %>%
+    filter(!is.na(coach)) %>%
+    group_by(coach) %>%
+    summarise(
+      total = sum(avg),
+      avg = mean(avg),
+      count = n()
+    ) %>%
+    arrange(desc(total)) %>%
+    mutate(rank = row_number()) %>%
+    filter(coach == myPick)
+
+  obs$total <- smy$total[1]
+  obs$rank <- smy$rank[1]
+  
+  results <- bind_rows(results,obs)
+  
+}
+
+control %>%
+    filter(!is.na(coach)) %>%
+    group_by(coach) %>%
+    summarise(
+      total = sum(avg),
+      avg = mean(avg),
+      count = n()
+    ) %>%
+    arrange(desc(total))
+
+
+results %>%
+  arrange(desc(total))
+
+players %>%
+  filter(coach == myPick) %>%
+  arrange(pick)
+
+##########################
+
+order <- 'MID|FWD|MID|DEF|DEF|DEF|FWD|FWD|FWD|DEF|DEF|MID|FWD|MID|MID|MID|RUC|MID'
+order  <- unlist(strsplit(order,"\\|"))
+
+#####
+
+bkp <- results
+
+
+d1 <- results %>%
+  separate(order, paste0('P', seq(1:18)), "\\|")
+
+results %>%
+  filter(pick == 8) %>%
+  arrange(desc(total))
+
+
+t <- d1 %>%
+  filter(rank == 1) %>%
+  filter(P1 == 'MID') %>%
+  filter(P2 != 'RUC') %>%
+  group_by(pick, P2) %>%
+  summarise(
+    obs = n()
+  ) %>%
+  arrange(desc(obs))
+  
+####################
+
+
+expand.grid(
+  P1 = "MID",
+  P2 = c("DEF", "MID", "FWD")
+)
+  
+  
+
+           
+           
+           
+
+
+
