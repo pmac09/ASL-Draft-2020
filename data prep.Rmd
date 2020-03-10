@@ -1,0 +1,220 @@
+---
+title: "Draft List 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rjson)
+library(tidyverse)
+library(rvest)
+```
+
+```{r sc_players}
+
+json_file <- './data/SC_2020_player_data.json'
+json_data <- fromJSON(paste(readLines(json_file), collapse=""))
+
+sc_players <- lapply(json_data, function(x){
+  
+  x$team_name <- x$team$name
+  x$team_abbrev <- x$team$abbrev
+  x$team <- NULL
+  
+  for(i in 1:length(x$positions)){
+    x[paste0('pos',i)] <- x$positions[[i]]$position
+  }
+  x$positions <- NULL
+  
+  return(x)
+})
+sc_players <- bind_rows(sc_players)
+
+sc_players <- sc_players %>%
+  rename(sc_id = id) %>%
+  rename(player_id = feed_id) %>%
+  select(player_id, sc_id, first_name, last_name, pos1, pos2,
+         team_id, team_name, team_abbrev)
+
+```
+
+
+```{r players}
+players <- read.delim("http://www.fanfooty.com.au/resource/player.php", 
+                      header = FALSE, 
+                      stringsAsFactors=F , 
+                      quote = "",
+                      fill =T)
+
+players <- as.data.frame(sapply(players, function(x) gsub(",\\s", " ", x)))
+players <- as.data.frame(sapply(players, function(x) gsub("\"\"", "\"", x)))
+
+names <- c("ff_id","player_id","first_name","last_name","team","status","jersey","dob","height","weight","origin","recruit","games","goals")
+
+players <- separate(players, col='V1', into=names, sep=",") %>% 
+  mutate_each(funs(str_replace_all(., "\"", "")))
+
+```
+
+```{r games}
+
+games <- read.delim("http://www.fanfooty.com.au/resource/draw.php", 
+                      header = FALSE, 
+                      stringsAsFactors=F , 
+                      quote = "",
+                      fill =T)
+
+games <- as.data.frame(sapply(games, function(x) gsub(",\\s", " ", x)))
+games <- as.data.frame(sapply(games, function(x) gsub("\"\"", "\"", x)))
+
+names <- c("match_id","year","comp","round","gametime","day","home_team","away_team","ground","timeslot","tv_coverage","home_supergoals","home_goals","home_behinds","home_points","away_supergoals","away_goals","away_behinds","away_points","status")
+
+games <-separate(games, col='V1', into=names, sep=",") %>% 
+  mutate_each(funs(str_replace_all(., "\"", "")))
+
+```
+
+```{r injuries}
+
+url <- "https://www.afl.com.au/matches/injury-list"
+
+# Get team names
+teams <- url %>%
+  read_html() %>%
+  html_nodes("img") %>%
+  xml_attrs()
+
+teams[[1]] <- NULL
+
+teams <- unlist(lapply(teams, function(x){
+  x[['alt']]
+}))
+
+# Get injury list tables
+injury_list <- url %>%
+  read_html() %>%
+  html_nodes("table") %>%
+  html_table()
+
+# Merge team names to injury list
+for (i in 1:length(teams)){
+  injury_list[[i]]$TEAM <- teams[i]
+}
+
+# Clean lists
+injury_list <- lapply(injury_list, function(x){
+  
+  dateString <- x[nrow(x),1]
+  dateString <- str_extract(dateString, '(?<=,\\s)(.*)')
+  dateString <- as.Date(dateString, format = "%B %d")
+  x$UPDATED <- dateString
+    
+  x <- x[1:(nrow(x)-1), ]
+  x <- x[x$INJURY != 'Nil',]
+    
+  return(x)
+})
+
+# combine lists
+injury_list <- bind_rows(injury_list)
+
+```
+
+
+```{r Preseason}
+
+preseason <- as_tibble(games) %>%
+  filter(year == 2020,
+         round == 0,
+         status == ' Full Time')
+
+game_stats <- tibble()
+
+for (i in 1:nrow(preseason)){
+  
+  gameNo <- preseason$match_id[i]
+  
+  url <- paste0("http://live.fanfooty.com.au/chat/", gameNo, ".txt")
+  ff_data <- tryCatch({readLines(url)},
+                       error=function(cond)   {NULL},
+                       warning=function(cond) {NULL})
+  
+  ff_data <- strsplit(ff_data[5:length(ff_data)], ',')
+  ff_data <- as_tibble(matrix(unlist(ff_data), nrow=length(ff_data), byrow=T))
+
+  names(ff_data) <- c(
+    'PLAYER_ID',
+    'FIRST_NAME',
+    'LAST_NAME',
+    'TEAM',
+    "V5",
+    "DREAMTEAM",
+    "SUPERCOACH",
+    "V8",
+    "V9",
+    "V10",
+    "KICKS",
+    "HANDBALLS",
+    "MARKS",
+    "TACKLES",
+    "HITOUTS",
+    "FREES_FOR",
+    "FREES_AGAINST",
+    "GOALS",
+    "BEHINDS",
+    "GAME_TIME",
+    "ICON_1",
+    "DESC_1",
+    "ICON_2",
+    "DESC_2",
+    "DT_PRICE",
+    "DT_BREAKEVEN",
+    "SC_PRICE",
+    "SC_BREAKEVEN",
+    "POSTION",
+    "JERSEY_NO",
+    "V31",
+    "V32",
+    "V33",
+    "V34",
+    "V35",
+    "V36",
+    "AF_PRICE",
+    "V38",
+    "V39",
+    "CONTESTED_POS",
+    "CLEARANCES",
+    "CLANGERS",
+    "DISP_EFFICIENCY",
+    "TIME_ON_GROUND"
+  )
+  
+  ff_data$MATCH_ID <- gameNo
+  
+  game_stats <- bind_rows(game_stats, ff_data)
+}
+
+game_stats
+  
+```
+
+
+```{r merge_lists}
+
+t <- as_tibble(players[, c('player_id','jersey','dob','games')]) %>%
+  mutate(player_id = as.numeric(player_id)) 
+
+
+x <- left_join(sc_players, t, by=c('player_id'='player_id')) %>%
+  mutate(age = 2019-as.numeric(substr(dob,1,4))) %>%
+  mutate(player_name = paste0(first_name, ' ', last_name))
+
+y <- left_join(x, injury_list,by=c('player_name'="PLAYER"))  %>%
+  mutate(injury = ifelse(is.na(INJURY), INJURY, paste0(INJURY, ": ", `ESTIMATED RETURN`, " (",UPDATED,")"))) %>%
+  select(player_id, sc_id, player_name, team_abbrev, jersey, pos1, pos2, age, games, injury)
+
+
+```
